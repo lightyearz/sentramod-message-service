@@ -284,17 +284,34 @@ async def create_message(
                 logger.error(f"Failed to track usage: {e}")
 
         # Track usage for ASSISTANT messages (Token Usage)
-        elif message.role == MessageRole.ASSISTANT and request_data.total_tokens:
+        elif message.role == MessageRole.ASSISTANT:
             try:
                 usage_service = get_usage_tracking_service()
+                
+                # Calculate tokens if not provided (server-side fallback)
+                input_tokens = request_data.input_tokens or 0
+                output_tokens = request_data.output_tokens or 0
+                total_tokens = request_data.total_tokens or 0
+                
+                # If total tokens is 0, we try to calculate them
+                if total_tokens == 0 and message.content:
+                    # We don't have the full input context here easily without fetching history
+                    # But we can at least count the output tokens accurately
+                    output_tokens = usage_service.count_tokens(message.content, request_data.model or "gpt-3.5-turbo")
+                    
+                    # For input tokens, we'd need the history. If provided as 0, we accept it for now
+                    # or could try to estimate based on conversation history length if we fetched it?
+                    # For now, let's just use what we have, ensuring at least output is counted.
+                    total_tokens = input_tokens + output_tokens
+
                 await usage_service.record_token_usage(
                     user_id=str(conversation.teen_id),
                     session_id=None,  # Not tracked here yet
                     provider=request_data.provider or "unknown",
                     model=request_data.model or "unknown",
-                    input_tokens=request_data.input_tokens or 0,
-                    output_tokens=request_data.output_tokens or 0,
-                    total_tokens=request_data.total_tokens,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
                     cost_usd=request_data.cost_usd,
                 )
             except Exception as e:
